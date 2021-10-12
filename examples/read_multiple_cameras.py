@@ -1,99 +1,123 @@
-import pyrealsense2 as rs2
-import numpy as np
+# Inspired from https://github.com/ivomarvan/samples_and_experiments/blob/master/Multiple_realsense_cameras/multiple_realsense_cameras.py
+
+
+import pyrealsense2 as rs
 import cv2
-import logging
+import numpy as np
 
-# The context object to be shared by all the
-context_obj = rs2.context()
-
-# Configure depth and color streams...
-# ...from Camera 1
-pipeline_1 = rs2.pipeline(context_obj)
-config_1 = rs2.config()
-config_1.enable_device('047322071398')
-config_1.enable_stream(rs2.stream.depth, 640, 480, rs2.format.z16, 30)
-config_1.enable_stream(rs2.stream.color, 640, 480, rs2.format.bgr8, 30)
-
-# ...from Camera 2
-pipeline_2 = rs2.pipeline(context_obj)
-config_2 = rs2.config()
-config_2.enable_device('048522075021')
-config_2.enable_stream(rs2.stream.depth, 640, 480, rs2.format.z16, 30)
-config_2.enable_stream(rs2.stream.color, 640, 480, rs2.format.bgr8, 30)
+from PIL import ImageFont, ImageDraw, Image
 
 
-# config_1.resolve(pipeline_1).get_device().query_sensors().set_option(rs2.stream   RS2_OPTION_INTER_CAM_SYNC_MODE, 1.f)
+# --- Realsence problem core -------------------------------------------------------------------------------------------
+class RealsenseCamera:
+    '''
+    Abstraction of any RealsenseCamera
+    '''
+    __colorizer = rs.colorizer()
 
-# Start streaming from both cameras
-pipeline_1.start(config_1)
-pipeline_2.start(config_2)
+    def __init__(
+            self,
+            serial_number: str,
+            name: str
+    ):
+        self.__serial_number = serial_number
+        self.__name = name
+        self.__pipeline = None
+        self.__started = False
+        self.__start_pipeline()
 
-try:
-    while True:
+    def __del__(self):
+        if self.__started and not self.__pipeline is None:
+            self.__pipeline.stop()
 
-        frames_1 = pipeline_1.wait_for_frames()
-        depth_frame_1 = frames_1.get_depth_frame()
-        color_frame_1 = frames_1.get_color_frame()
-        if not depth_frame_1 or not color_frame_1:
-            continue
-        cv2.imshow('PC', np.asarray(pc.map_to(color_frame_1)))
+    def get_full_name(self):
+        return f'{self.__name} ({self.__serial_number})'
 
-        # Camera 1
-        # Wait for a coherent pair of frames: depth and color
+    def __start_pipeline(self):
+        # Configure depth and color streams
+        self.__pipeline = rs.pipeline()
+        config = rs.config()
+        config.enable_device(self.__serial_number)
+        config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 15)  # stream type, resolution, format and frame rate
+        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 15)  # We can check the possible values from the realsense-viewer
+        # Let us also limit the depth camera can see
+        self.__config = config  # Storing the config object for possible later use
+        self.profile = self.__pipeline.start(config)
+        self.__started = True
+        print(f'{self.get_full_name()} camera is ready.')
 
-        # frames_1 = pipeline_1.wait_for_frames()
-        # depth_frame_1 = frames_1.get_depth_frame()
-        # color_frame_1 = frames_1.get_color_frame()
-        # if not depth_frame_1 or not color_frame_1:
-        #     continue
-        # # Convert images to numpy arrays
-        # depth_image_1 = np.asanyarray(depth_frame_1.get_data())
-        # color_image_1 = np.asanyarray(color_frame_1.get_data())
-        # # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
-        # depth_colormap_1 = cv2.applyColorMap(cv2.convertScaleAbs(depth_image_1, alpha=0.5), cv2.COLORMAP_JET)
-        #
-        # # Let us get the camera extrinsics here
-        # depth_to_color_extrin_1 = depth_frame_1.profile.get_extrinsics_to(color_frame_1.profile)
-        #
-        # # Camera 2
-        # # Wait for a coherent pair of frames: depth and color
-        # frames_2 = pipeline_2.wait_for_frames()
-        # depth_frame_2 = frames_2.get_depth_frame()
-        # color_frame_2 = frames_2.get_color_frame()
-        # if not depth_frame_2 or not color_frame_2:
-        #     continue
-        # # Convert images to numpy arrays
-        # depth_image_2 = np.asanyarray(depth_frame_2.get_data())
-        # color_image_2 = np.asanyarray(color_frame_2.get_data())
-        # # Apply colormap on depth image (image must be converted to 8-bit per pixel first)
-        # depth_colormap_2 = cv2.applyColorMap(cv2.convertScaleAbs(depth_image_2, alpha=0.5), cv2.COLORMAP_JET)
-        #
-        #
-        # # color_point = rs.rs2_transform_point_to_point(depth_to_color_extrin_1, depth_frame_2)
-        #
-        #
-        # # Stack all images horizontally
-        # # images = np.hstack((color_image_1, depth_colormap_1,color_image_2, depth_colormap_2))
-        #
-        # # Show images from both cameras
-        # cv2.namedWindow('RealSense', cv2.WINDOW_NORMAL)
-        # cv2.imshow('RealSense', points)
-        # cv2.waitKey(1)
+    def get_frames(self) -> [rs.frame]:
+        align_to = rs.stream.color
+        align = rs.align(align_to)
 
-        # Save images and depth maps from both cameras by pressing 'ds'
-        ch = cv2.waitKey(25)
-        # if ch == 115:
-        #     cv2.imwrite("my_image_1.jpg",color_image_1)
-        #     cv2.imwrite("my_depth_1.jpg",depth_colormap_1)
-        #     cv2.imwrite("my_image_2.jpg",color_image_2)
-        #     cv2.imwrite("my_depth_2.jpg",depth_colormap_2)
-        #     print("Save")
-        if ch == 27:
-            break
+        frames = self.__pipeline.wait_for_frames()
+        # Align the depth frame to color frame
+        aligned_frames = align.process(frames)
+
+        # Get aligned frames
+        aligned_depth_frame = aligned_frames.get_depth_frame()
+        color_frame = aligned_frames.get_color_frame()
+
+        depth_image = np.asanyarray(aligned_depth_frame.get_data())
+        color_image = np.asanyarray(color_frame.get_data())
+        if not aligned_depth_frame or not color_frame:
+            return False, None, None, None
+        return True, depth_image, color_image, color_frame
 
 
-finally:
+class AllCamerasLoop:
+    '''
+    Take info from all conected cameras in the loop.
+    '''
 
-    # Stop streaming
-    pipeline_1.stop()
-    pipeline_2.stop()
+    @classmethod
+    def get_conected_cameras_info(cls, camera_name_suffix: str = 'T265') -> [(str, str)]:
+        '''
+        Return list of (serial number,names) conected devices.
+        Eventualy only fit given suffix (like T265, D415, ...)
+        (based on https://github.com/IntelRealSense/librealsense/issues/2332)
+        '''
+        ret_list = []
+        ctx = rs.context()
+        for d in ctx.devices:
+            serial_number = d.get_info(rs.camera_info.serial_number)
+            name = d.get_info(rs.camera_info.name)
+            # Attempts
+            original_depth_table = rs.rs400_advanced_mode(d).get_depth_table()
+            # Change the depth clamping to a range ensuring we do not go much beyond the immediate viscinity
+            original_depth_table.depthClampMax = 500
+            rs.rs400_advanced_mode(d).set_depth_table(original_depth_table)
+            print(f"depth value changed to {original_depth_table.depthClampMax}")
+            if camera_name_suffix and not name.endswith(camera_name_suffix):
+                continue
+            ret_list.append((serial_number, name))
+        return ret_list
+
+    @classmethod
+    def get_all_conected_cameras(cls) -> [RealsenseCamera]:
+        cameras = cls.get_conected_cameras_info(camera_name_suffix=None)
+        return [RealsenseCamera(serial_number, name) for serial_number, name in cameras]
+
+    def __init__(self):
+        self.__cameras = self.get_all_conected_cameras()
+
+    def get_frames(self, camera) -> [rs.frame]:
+        '''
+        Return frames in given order.
+        '''
+        while True:
+            ret, depth_frame, color_frame, _ = camera.get_frames()
+            cv2.imshow("color", color_frame)
+            key = cv2.waitKey(1)
+            if key == 27:
+                break
+
+    def run_loop(self):
+        for camera in self.__cameras:
+            self.get_frames(camera)
+
+
+if __name__ == "__main__":
+    viewer = AllCamerasLoop()
+    print(viewer.get_conected_cameras_info(camera_name_suffix='D435I'))
+    viewer.run_loop()
