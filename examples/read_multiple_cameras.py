@@ -38,8 +38,8 @@ class RealsenseCamera:
         self.__pipeline = rs.pipeline()
         config = rs.config()
         config.enable_device(self.__serial_number)
-        config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 15)  # stream type, resolution, format and frame rate
-        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 15)  # We can check the possible values from the realsense-viewer
+        config.enable_stream(rs.stream.depth, 1280, 720, rs.format.z16, 6)  # stream type, resolution, format and frame rate
+        config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 6)  # We can check the possible values from the realsense-viewer
         # Let us also limit the depth camera can see
         self.__config = config  # Storing the config object for possible later use
         self.profile = self.__pipeline.start(config)
